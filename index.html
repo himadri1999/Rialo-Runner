@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rialo Runner</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #2c1810, #1a1a1a);
+        }
+        
+        #gameCanvas {
+            display: block;
+            background: linear-gradient(180deg, #f5f1eb 0%, #e8ddd4 100%);
+        }
+        
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .reputation-bar {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 300px;
+            height: 30px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 15px;
+            border: 3px solid #fff;
+            overflow: hidden;
+        }
+        
+        .reputation-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff4444 0%, #ffaa44 50%, #44ff44 100%);
+            transition: width 0.3s ease;
+            position: relative;
+        }
+        
+        .reputation-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%);
+            animation: shine 2s infinite;
+        }
+        
+        @keyframes shine {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        
+        .score {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        .game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            display: none;
+        }
+        
+        .start-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #ff6b35, #f7931e);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 10px;
+            transition: transform 0.1s;
+            pointer-events: all;
+        }
+        
+        button:hover {
+            transform: scale(1.05);
+        }
+        
+        button:active {
+            transform: scale(0.95);
+        }
+        
+        .instructions {
+            margin: 20px 0;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .npc-cheer {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="ui">
+        <div class="reputation-bar">
+            <div class="reputation-fill" id="reputationFill" style="width: 50%"></div>
+        </div>
+        <div class="score" id="score">Score: 0</div>
+        <div class="npc-cheer" id="npcCheer">Keep it up!</div>
+        
+        <div class="start-screen" id="startScreen">
+            <h1 style="color: #ff6b35; margin-bottom: 10px;">🏃‍♂️ Rialo Runner</h1>
+            <p style="font-size: 18px; margin-bottom: 20px;">Where Reputation is Everything!</p>
+            <div class="instructions">
+                <p><strong>How to Play:</strong></p>
+                <p>• Use SPACE or CLICK to jump</p>
+                <p>• Collect 🪙 Kindness Coins, 🏅 Truth Badges, 🤝 Helping Hands</p>
+                <p>• Avoid 🤥 Lies, 💰 Greed Traps, 🎭 Scams, Potholes, 🍌 Banana Peels, Mud Puddles</p>
+                <p>• Your reputation is your health - don't let it hit zero!</p>
+                <p>• Higher reputation = higher score multiplier</p>
+            </div>
+            <button onclick="startGame()">Start Game</button>
+        </div>
+        
+        <div class="game-over" id="gameOver">
+            <h2>Game Over!</h2>
+            <p id="finalScore">Final Score: 0</p>
+            <p id="gameOverMessage">The crowd caught up to you!</p>
+            <button onclick="restartGame()">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        // Game state
+        let gameState = 'start'; // 'start', 'playing', 'gameOver'
+        let score = 0;
+        let reputation = 50; // 0-100
+        let gameSpeed = 2;
+        let scrollOffset = 0;
+        
+        // Player
+        const player = {
+            x: 100,
+            y: canvas.height - 150,
+            width: 40,
+            height: 60,
+            velY: 0,
+            jumping: false,
+            grounded: true,
+            color: '#ff6b35'
+        };
+        
+        // Arrays for game objects
+        let obstacles = [];
+        let collectibles = [];
+        let backgroundElements = [];
+        let particles = [];
+        let npcs = [];
+        
+        // Initialize background elements
+        function initBackground() {
+            // Create flowing background shapes inspired by the image
+            for (let i = 0; i < 15; i++) {
+                backgroundElements.push({
+                    x: Math.random() * canvas.width * 2,
+                    y: Math.random() * canvas.height,
+                    size: Math.random() * 100 + 50,
+                    speed: Math.random() * 0.5 + 0.2,
+                    color: Math.random() > 0.5 ? '#2c1810' : '#1a1a1a',
+                    shape: Math.floor(Math.random() * 3),
+                    type: 'shape'
+                });
+            }
+            
+            // Add Rialo text in background
+            for (let i = 0; i < 5; i++) {
+                backgroundElements.push({
+                    x: Math.random() * canvas.width * 4 + canvas.width,
+                    y: Math.random() * (canvas.height - 150) + 50,
+                    size: Math.random() * 60 + 80,
+                    speed: Math.random() * 0.4 + 0.1,
+                    color: Math.random() > 0.5 ? '#000000' : '#333333',
+                    type: 'text',
+                    opacity: 0.08 + Math.random() * 0.12,
+                    rotation: Math.random() * 0.4 - 0.2
+                });
+            }
+            
+            // Create NPCs
+            for (let i = 0; i < 8; i++) {
+                npcs.push({
+                    x: Math.random() * canvas.width * 3,
+                    y: canvas.height - 120 + Math.random() * 50,
+                    size: 20,
+                    mood: 'neutral',
+                    lastMoodChange: 0
+                });
+            }
+        }
+        
+        // Spawn obstacles and collectibles
+        function spawnObjects() {
+            if (Math.random() < 0.025) {
+                // Spawn obstacle
+                const obstacleTypes = ['lie', 'scam', 'greed', 'pothole', 'banana', 'mud'];
+                const type = obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)];
+                
+                let obstacleConfig = {
+                    x: canvas.width,
+                    y: canvas.height - 140,
+                    width: 35,
+                    height: 25,
+                    type: type,
+                    damage: -10,
+                    bounce: 0
+                };
+                
+                // Special configurations for ground obstacles
+                if (type === 'pothole') {
+                    obstacleConfig.y = canvas.height - 120;
+                    obstacleConfig.width = 50;
+                    obstacleConfig.height = 20;
+                } else if (type === 'banana') {
+                    obstacleConfig.y = canvas.height - 125;
+                    obstacleConfig.width = 30;
+                    obstacleConfig.height = 15;
+                } else if (type === 'mud') {
+                    obstacleConfig.y = canvas.height - 130;
+                    obstacleConfig.width = 60;
+                    obstacleConfig.height = 30;
+                }
+                
+                obstacles.push(obstacleConfig);
+            }
+            
+            if (Math.random() < 0.015) {
+                // Spawn collectible
+                const collectibleTypes = ['kindness', 'truth', 'help'];
+                const type = collectibleTypes[Math.floor(Math.random() * collectibleTypes.length)];
+                collectibles.push({
+                    x: canvas.width,
+                    y: canvas.height - 180 - Math.random() * 100,
+                    width: 25,
+                    height: 25,
+                    type: type,
+                    value: 15,
+                    bounce: 0
+                });
+            }
+        }
+        
+        // Handle input
+        function handleInput() {
+            if (player.grounded && (keys[' '] || mousePressed)) {
+                player.velY = -15;
+                player.jumping = true;
+                player.grounded = false;
+            }
+        }
+        
+        // Update game objects
+        function update() {
+            if (gameState !== 'playing') return;
+            
+            // Update player physics
+            player.velY += 0.8; // gravity
+            player.y += player.velY;
+            
+            if (player.y >= canvas.height - 150) {
+                player.y = canvas.height - 150;
+                player.velY = 0;
+                player.jumping = false;
+                player.grounded = true;
+            }
+            
+            // Update background
+            scrollOffset += gameSpeed;
+            backgroundElements.forEach(elem => {
+                elem.x -= elem.speed * gameSpeed;
+                if (elem.type === 'text') {
+                    if (elem.x < -elem.size * 4) {
+                        elem.x = canvas.width + Math.random() * canvas.width * 2;
+                    }
+                } else {
+                    if (elem.x < -elem.size) {
+                        elem.x = canvas.width + elem.size;
+                    }
+                }
+            });
+            
+            // Update NPCs
+            npcs.forEach(npc => {
+                npc.x -= gameSpeed;
+                if (npc.x < -50) {
+                    npc.x = canvas.width + Math.random() * 200;
+                }
+                
+                // Update NPC mood based on reputation
+                if (Date.now() - npc.lastMoodChange > 1000) {
+                    if (reputation > 70) npc.mood = 'happy';
+                    else if (reputation < 30) npc.mood = 'angry';
+                    else npc.mood = 'neutral';
+                    npc.lastMoodChange = Date.now();
+                }
+            });
+            
+            // Update obstacles
+            obstacles = obstacles.filter(obs => {
+                obs.x -= gameSpeed;
+                obs.bounce += 0.15;
+                
+                // Add bouncing animation to some obstacles
+                if (obs.type === 'banana' || obs.type === 'pothole') {
+                    obs.y += Math.sin(obs.bounce) * 2;
+                }
+                
+                // Collision detection
+                if (obs.x < player.x + player.width &&
+                    obs.x + obs.width > player.x &&
+                    obs.y < player.y + player.height &&
+                    obs.y + obs.height > player.y) {
+                    
+                    reputation += obs.damage;
+                    reputation = Math.max(0, Math.min(100, reputation));
+                    
+                    // Create damage particles
+                    for (let i = 0; i < 10; i++) {
+                        particles.push({
+                            x: obs.x,
+                            y: obs.y,
+                            velX: (Math.random() - 0.5) * 10,
+                            velY: Math.random() * -5 - 2,
+                            life: 60,
+                            color: '#ff4444'
+                        });
+                    }
+                    
+                    updateNPCCheer('negative');
+                    return false;
+                }
+                
+                return obs.x > -obs.width;
+            });
+            
+            // Update collectibles
+            collectibles = collectibles.filter(col => {
+                col.x -= gameSpeed;
+                col.bounce += 0.1;
+                col.y += Math.sin(col.bounce) * 1;
+                
+                // Collision detection
+                if (col.x < player.x + player.width &&
+                    col.x + col.width > player.x &&
+                    col.y < player.y + player.height &&
+                    col.y + col.height > player.y) {
+                    
+                    reputation += col.value;
+                    reputation = Math.max(0, Math.min(100, reputation));
+                    
+                    const multiplier = Math.floor(reputation / 10) + 1;
+                    score += 10 * multiplier;
+                    
+                    // Create positive particles
+                    for (let i = 0; i < 15; i++) {
+                        particles.push({
+                            x: col.x,
+                            y: col.y,
+                            velX: (Math.random() - 0.5) * 8,
+                            velY: Math.random() * -8 - 2,
+                            life: 80,
+                            color: '#44ff44'
+                        });
+                    }
+                    
+                    updateNPCCheer('positive');
+                    return false;
+                }
+                
+                return col.x > -col.width;
+            });
+            
+            // Update particles
+            particles = particles.filter(p => {
+                p.x += p.velX;
+                p.y += p.velY;
+                p.velY += 0.3;
+                p.life--;
+                return p.life > 0;
+            });
+            
+            // Spawn new objects
+            spawnObjects();
+            
+            // Increase game speed gradually
+            gameSpeed += 0.001;
+            
+            // Update score
+            const multiplier = Math.floor(reputation / 10) + 1;
+            score += multiplier;
+            
+            // Check game over
+            if (reputation <= 0) {
+                gameState = 'gameOver';
+                document.getElementById('finalScore').textContent = `Final Score: ${score}`;
+                document.getElementById('gameOverMessage').textContent = 'Your reputation hit rock bottom! The crowd caught up!';
+                document.getElementById('gameOver').style.display = 'block';
+            }
+            
+            // Update UI
+            updateUI();
+        }
+        
+        // Update NPC cheer messages
+        function updateNPCCheer(type) {
+            const cheerElement = document.getElementById('npcCheer');
+            const messages = {
+                positive: ['Amazing!', 'Well done!', 'Keep it up!', 'You\'re a hero!', 'Fantastic!'],
+                negative: ['Oh no!', 'Watch out!', 'Be careful!', 'That hurt!', 'Recover!']
+            };
+            
+            const randomMessage = messages[type][Math.floor(Math.random() * messages[type].length)];
+            cheerElement.textContent = randomMessage;
+            cheerElement.style.opacity = '1';
+            cheerElement.style.color = type === 'positive' ? '#44ff44' : '#ff4444';
+            
+            setTimeout(() => {
+                cheerElement.style.opacity = '0';
+            }, 1500);
+        }
+        
+        // Update UI elements
+        function updateUI() {
+            document.getElementById('reputationFill').style.width = reputation + '%';
+            document.getElementById('score').textContent = `Score: ${score} (x${Math.floor(reputation / 10) + 1})`;
+        }
+        
+        // Draw everything
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw background inspired by the image
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#f5f1eb');
+            gradient.addColorStop(1, '#e8ddd4');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw flowing background elements
+            backgroundElements.forEach(elem => {
+                ctx.save();
+                
+                if (elem.type === 'text') {
+                    // Draw Rialo text
+                    ctx.globalAlpha = elem.opacity;
+                    ctx.fillStyle = elem.color;
+                    ctx.translate(elem.x, elem.y);
+                    ctx.rotate(elem.rotation);
+                    
+                    // Use a bold, modern font for Rialo text
+                    ctx.font = `bold ${elem.size}px Arial, sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('Rialo', 0, 0);
+                    
+                } else {
+                    // Draw original background shapes
+                    ctx.fillStyle = elem.color;
+                    ctx.globalAlpha = 0.3;
+                    ctx.beginPath();
+                    
+                    if (elem.shape === 0) {
+                        // Rounded rectangle
+                        ctx.roundRect(elem.x, elem.y, elem.size, elem.size * 0.6, elem.size * 0.3);
+                    } else if (elem.shape === 1) {
+                        // Circle
+                        ctx.arc(elem.x, elem.y, elem.size / 2, 0, Math.PI * 2);
+                    } else {
+                        // Organic shape
+                        ctx.arc(elem.x, elem.y, elem.size / 2, 0, Math.PI * 2);
+                    }
+                    
+                    ctx.fill();
+                }
+                
+                ctx.restore();
+            });
+            
+            // Draw ground
+            ctx.fillStyle = '#8b7355';
+            ctx.fillRect(0, canvas.height - 100, canvas.width, 100);
+            
+            // Draw NPCs
+            npcs.forEach(npc => {
+                ctx.save();
+                ctx.translate(npc.x, npc.y);
+                
+                // Body
+                ctx.fillStyle = '#666';
+                ctx.fillRect(-10, -20, 20, 30);
+                
+                // Head
+                ctx.fillStyle = '#fdbcb4';
+                ctx.beginPath();
+                ctx.arc(0, -30, 12, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Expression
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                if (npc.mood === 'happy') {
+                    ctx.arc(-4, -33, 2, 0, Math.PI * 2);
+                    ctx.arc(4, -33, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(0, -28, 6, 0, Math.PI);
+                    ctx.stroke();
+                } else if (npc.mood === 'angry') {
+                    ctx.fillRect(-6, -33, 4, 2);
+                    ctx.fillRect(2, -33, 4, 2);
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(0, -25, 6, Math.PI, 0);
+                    ctx.stroke();
+                } else {
+                    ctx.arc(-4, -33, 2, 0, Math.PI * 2);
+                    ctx.arc(4, -33, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                ctx.restore();
+            });
+            
+            if (gameState === 'playing') {
+                // Draw player with reputation-based appearance
+                ctx.save();
+                ctx.translate(player.x + player.width/2, player.y + player.height/2);
+                
+                // Player glow based on reputation
+                if (reputation > 70) {
+                    ctx.shadowColor = '#ffff44';
+                    ctx.shadowBlur = 20;
+                } else if (reputation < 30) {
+                    // Rotten tomato effect
+                    ctx.fillStyle = '#8b4513';
+                    for (let i = 0; i < 5; i++) {
+                        const angle = (Math.PI * 2 * i) / 5;
+                        const x = Math.cos(angle) * 25;
+                        const y = Math.sin(angle) * 25;
+                        ctx.beginPath();
+                        ctx.arc(x, y, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+                
+                // Player body
+                ctx.fillStyle = reputation > 50 ? '#ff6b35' : reputation > 30 ? '#ff8844' : '#994422';
+                ctx.fillRect(-player.width/2, -player.height/2, player.width, player.height);
+                
+                // Player head
+                ctx.fillStyle = '#fdbcb4';
+                ctx.beginPath();
+                ctx.arc(0, -player.height/2 - 10, 15, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Player expression
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                ctx.arc(-5, -player.height/2 - 13, 2, 0, Math.PI * 2);
+                ctx.arc(5, -player.height/2 - 13, 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                if (reputation > 70) {
+                    // Happy smile
+                    ctx.beginPath();
+                    ctx.arc(0, -player.height/2 - 8, 8, 0, Math.PI);
+                    ctx.stroke();
+                } else if (reputation < 30) {
+                    // Sad frown
+                    ctx.beginPath();
+                    ctx.arc(0, -player.height/2 - 2, 8, Math.PI, 0);
+                    ctx.stroke();
+                }
+                
+                ctx.restore();
+                
+                // Draw obstacles
+                obstacles.forEach(obs => {
+                    ctx.save();
+                    ctx.translate(obs.x + obs.width/2, obs.y + obs.height/2);
+                    
+                    if (obs.type === 'lie') {
+                        ctx.font = '28px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('🤥', 0, 8);
+                    } else if (obs.type === 'scam') {
+                        ctx.font = '28px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('🎭', 0, 8);
+                    } else if (obs.type === 'greed') {
+                        ctx.font = '28px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('💰', 0, 8);
+                    } else if (obs.type === 'pothole') {
+                        // Draw animated pothole
+                        ctx.fillStyle = '#2c1810';
+                        ctx.beginPath();
+                        ctx.ellipse(0, 0, obs.width/2, obs.height/2, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                        // Add some "danger" sparkles
+                        ctx.fillStyle = '#ff4444';
+                        for (let i = 0; i < 3; i++) {
+                            const angle = (obs.bounce + i * 2) * 0.5;
+                            const sparkleX = Math.cos(angle) * 20;
+                            const sparkleY = Math.sin(angle) * 10;
+                            ctx.beginPath();
+                            ctx.arc(sparkleX, sparkleY, 2, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                    } else if (obs.type === 'banana') {
+                        // Draw banana peel
+                        ctx.font = '24px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('🍌', 0, 8);
+                        
+                        // Add slip lines
+                        ctx.strokeStyle = '#ffff44';
+                        ctx.lineWidth = 2;
+                        for (let i = 0; i < 3; i++) {
+                            const offset = i * 8 - 8;
+                            ctx.beginPath();
+                            ctx.moveTo(offset, 15);
+                            ctx.lineTo(offset + 6, 20);
+                            ctx.stroke();
+                        }
+                    } else if (obs.type === 'mud') {
+                        // Draw mud puddle
+                        ctx.fillStyle = '#8b4513';
+                        ctx.beginPath();
+                        ctx.ellipse(0, 0, obs.width/2, obs.height/2, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                        // Add mud splashes
+                        ctx.fillStyle = '#654321';
+                        for (let i = 0; i < 4; i++) {
+                            const angle = (obs.bounce + i) * 0.8;
+                            const splashX = Math.cos(angle) * 25;
+                            const splashY = Math.sin(angle) * 12 - 5;
+                            ctx.beginPath();
+                            ctx.arc(splashX, splashY, 3, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                        
+                        // Add stink lines
+                        ctx.strokeStyle = '#90EE90';
+                        ctx.lineWidth = 2;
+                        for (let i = 0; i < 3; i++) {
+                            const lineX = (i - 1) * 15;
+                            ctx.beginPath();
+                            ctx.moveTo(lineX, -15);
+                            ctx.quadraticCurveTo(lineX + 5, -25, lineX, -35);
+                            ctx.stroke();
+                        }
+                    }
+                    
+                    ctx.restore();
+                });
+                
+                // Draw collectibles
+                collectibles.forEach(col => {
+                    ctx.save();
+                    ctx.translate(col.x + col.width/2, col.y + col.height/2);
+                    
+                    if (col.type === 'kindness') {
+                        ctx.font = '20px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('🪙', 0, 6);
+                    } else if (col.type === 'truth') {
+                        ctx.font = '20px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('🏅', 0, 6);
+                    } else if (col.type === 'help') {
+                        ctx.font = '20px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('🤝', 0, 6);
+                    }
+                    
+                    ctx.restore();
+                });
+                
+                // Draw particles
+                particles.forEach(p => {
+                    ctx.save();
+                    ctx.globalAlpha = p.life / 80;
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                });
+            }
+        }
+        
+        // Input handling
+        const keys = {};
+        let mousePressed = false;
+        
+        document.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+        
+        canvas.addEventListener('mousedown', () => {
+            mousePressed = true;
+        });
+        
+        canvas.addEventListener('mouseup', () => {
+            mousePressed = false;
+        });
+        
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            mousePressed = true;
+        });
+        
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            mousePressed = false;
+        });
+        
+        // Game functions
+        function startGame() {
+            gameState = 'playing';
+            score = 0;
+            reputation = 50;
+            gameSpeed = 2;
+            obstacles = [];
+            collectibles = [];
+            particles = [];
+            player.y = canvas.height - 150;
+            player.velY = 0;
+            player.grounded = true;
+            
+            document.getElementById('startScreen').style.display = 'none';
+            document.getElementById('gameOver').style.display = 'none';
+            
+            updateUI();
+        }
+        
+        function restartGame() {
+            startGame();
+        }
+        
+        // Game loop
+        function gameLoop() {
+            handleInput();
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Initialize and start
+        initBackground();
+        updateUI();
+        gameLoop();
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            player.y = canvas.height - 150;
+        });
+    </script>
+</body>
+</html>
